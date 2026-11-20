@@ -59,6 +59,3 @@ Run tests with:
 ```powershell
 python -m pytest -q
 ```
-
-
-#Tested by DR.yinti Revathi

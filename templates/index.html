@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#12372a">
+    <title>MediScope — Symptom Check</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="shell">
+        <aside>
+            <a class="brand" href="/" aria-label="MediScope home">
+                <span class="brand-mark">M</span><span>MediScope</span>
+            </a>
+            <nav aria-label="Main navigation">
+                <a class="nav-active" href="/"><span class="nav-icon">⌕</span> Symptom check</a>
+                <button class="nav-button" type="button" id="history-link"><span class="nav-icon">◷</span> History</button>
+            </nav>
+            <div class="privacy"><span>◇</span><div><strong>Private assessment</strong><small>Results stay on this device</small></div></div>
+        </aside>
+
+        <main>
+            <header>
+                <div>
+                    <p class="eyebrow">PATIENT SYMPTOM CHECK</p>
+                    <h1>How are you feeling?</h1>
+                    <p class="subtitle">Choose symptoms, then answer a short set of follow-up questions.</p>
+                </div>
+                <span class="status"><i></i> Model ready</span>
+            </header>
+
+            {% if error %}<div class="alert" role="alert">{{ error }}</div>{% endif %}
+
+            <form method="post" action="/predict" id="symptom-form">
+                <section class="panel">
+                    <div class="panel-heading">
+                        <div><span class="step">01</span><h2>Select your symptoms</h2></div>
+                        <span id="selected-count">0 selected</span>
+                    </div>
+
+                    <label class="search-box" for="symptom-search">
+                        <span aria-hidden="true">⌕</span>
+                        <input id="symptom-search" type="search" placeholder="Search symptoms, e.g. fever or cough" autocomplete="off">
+                        <kbd>/</kbd>
+                    </label>
+
+                    <div class="category-bar" id="category-bar" aria-label="Symptom categories">
+                        <button type="button" class="category active" data-category="All">All</button>
+                        <button type="button" class="category" data-category="General symptoms">General</button>
+                        <button type="button" class="category" data-category="Respiratory">Respiratory</button>
+                        <button type="button" class="category" data-category="Cardiovascular">Heart</button>
+                        <button type="button" class="category" data-category="Neurological">Neurological</button>
+                        <button type="button" class="category" data-category="Digestive">Digestive</button>
+                        <button type="button" class="category" data-category="Skin and dermatological">Skin</button>
+                        <button type="button" class="category" data-category="Musculoskeletal">Muscles & joints</button>
+                        <button type="button" class="category" data-category="Eyes and ENT">Eyes & ENT</button>
+                        <button type="button" class="category" data-category="Urinary">Urinary</button>
+                        <button type="button" class="category" data-category="Reproductive">Reproductive</button>
+                    </div>
+
+                    <div id="selected-chips" class="selected-chips" aria-live="polite"></div>
+                    <button type="button" id="clear-selection" class="clear-button" hidden>Clear selection</button>
+
+                    <div class="symptom-grid" id="symptom-grid">
+                        {% for item in taxonomy %}
+                            {% if item.selectable %}
+                            <label class="symptom-card" data-label="{{ (item.display_name ~ ' ' ~ item.patient_friendly_description ~ ' ' ~ item.synonyms|join(' '))|lower }}" data-category="{{ item.category }}">
+                                <input type="checkbox" name="symptoms" value="{{ item.evidence_id }}" {% if selected and item.evidence_id in selected %}checked{% endif %}>
+                                <span class="check"></span>
+                                <span>
+                                    <strong>{{ item.display_name }}</strong>
+                                    <small>{{ item.patient_friendly_description }}</small>
+                                </span>
+                            </label>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    <p class="grid-count" id="grid-count"></p>
+                </section>
+
+                <section class="panel context-panel">
+                    <div class="panel-heading"><div><span class="step">02</span><h2>About you</h2></div></div>
+                    <div class="context-grid">
+                        <label><span>Age</span><input type="number" name="age" min="0" max="120" value="{{ age or 30 }}"></label>
+                        <fieldset>
+                            <legend>Sex</legend>
+                            <div class="segmented">
+                                <label><input type="radio" name="sex" value="F" {% if sex == "F" %}checked{% endif %}><span>Female</span></label>
+                                <label><input type="radio" name="sex" value="M" {% if sex == "M" %}checked{% endif %}><span>Male</span></label>
+                                <label><input type="radio" name="sex" value="U" {% if sex != "F" and sex != "M" %}checked{% endif %}><span>Prefer not to say</span></label>
+                            </div>
+                        </fieldset>
+                    </div>
+                </section>
+
+                <section class="panel followup-panel" id="followups" hidden>
+                    <div class="panel-heading"><div><span class="step">03</span><h2>A few follow-up questions</h2></div></div>
+                    <div id="followup-list"></div>
+                </section>
+                <input type="hidden" name="evidence_states" id="evidence-states" value="{}">
+
+                <button class="primary-button" type="submit"><span>Analyze my symptoms</span><b>→</b></button>
+            </form>
+
+            {% if result %}
+                <section class="result-panel" aria-live="polite">
+                    <div class="result-top">
+                        <div><p class="eyebrow">DIFFERENTIAL OVERVIEW</p><h2>{{ result.prediction }}</h2></div>
+                        <span class="confidence">{{ result.confidence }}%</span>
+                    </div>
+                    <p class="uncertainty"><strong>{{ result.uncertainty }}</strong> — not a diagnosis</p>
+                    {% if result.safety.urgent %}
+                        <div class="urgent-alert" role="alert">
+                            <strong>Urgent: {{ result.safety.signals|join(", ") }}</strong>
+                            <p>{{ result.safety.guidance }}</p>
+                        </div>
+                    {% endif %}
+                    <div class="alternatives">
+                        {% for item in result.alternatives %}
+                            <div><span>{{ item.condition }}</span><strong>{{ item.probability }}%</strong></div>
+                        {% endfor %}
+                    </div>
+                    <p class="supporting"><strong>Reported evidence:</strong> {{ result.supporting_evidence|join(", ") or "None" }}</p>
+                    <p class="supporting"><strong>Missing information:</strong> {{ result.missing_information }}</p>
+                    <p class="supporting"><strong>Model probabilities:</strong> {{ result.calibration }}</p>
+                    <p class="next-step">{{ result.next_step }}</p>
+                </section>
+            {% endif %}
+
+            <section class="history-panel" id="history">
+                <h2>Recent assessments</h2>
+                <p class="history-empty">No assessments saved on this device.</p>
+            </section>
+            <div class="medical-note"><strong>Important:</strong> MediScope is an educational decision-support prototype using synthetic DDXPlus data. It is not a diagnosis or emergency triage service.</div>
+        </main>
+    </div>
+
+    <script>
+        const search = document.getElementById("symptom-search");
+        const cards = [...document.querySelectorAll(".symptom-card")];
+        const checkboxes = [...document.querySelectorAll("input[name='symptoms']")];
+        const counter = document.getElementById("selected-count");
+        const chips = document.getElementById("selected-chips");
+        const clearButton = document.getElementById("clear-selection");
+        const followupPanel = document.getElementById("followups");
+        const followupList = document.getElementById("followup-list");
+        const evidenceStatesInput = document.getElementById("evidence-states");
+        const evidenceStates = {};
+        let activeCategory = "All";
+
+        function updateCards() {
+            const query = search.value.trim().toLowerCase();
+            let visible = 0;
+            cards.forEach(card => {
+                const visibleCategory = activeCategory === "All" || card.dataset.category === activeCategory;
+                const visibleSearch = !query || card.dataset.label.includes(query);
+                card.hidden = !(visibleCategory && visibleSearch);
+                if (!card.hidden) visible++;
+            });
+            document.getElementById("grid-count").textContent = visible + " symptoms";
+        }
+        function updateSelection() {
+            const selected = checkboxes.filter(item => item.checked);
+            counter.textContent = selected.length + " selected";
+            chips.innerHTML = "";
+            selected.forEach(item => {
+                const card = item.closest(".symptom-card");
+                const name = card.querySelector("strong").textContent;
+                const chip = document.createElement("span");
+                chip.className = "selected-chip";
+                chip.innerHTML = `<span>${name}</span><button type="button" aria-label="Remove ${name}">×</button>`;
+                chip.querySelector("button").addEventListener("click", () => {
+                    item.checked = false;
+                    updateSelection();
+                });
+                chips.appendChild(chip);
+            });
+            clearButton.hidden = selected.length === 0;
+            evidenceStatesInput.value = JSON.stringify(evidenceStates);
+            requestFollowups();
+        }
+
+        async function requestFollowups() {
+            const selected = checkboxes.filter(item => item.checked).map(item => item.value);
+            selected.forEach(id => {
+                if (!evidenceStates[id]) evidenceStates[id] = {state:"PRESENT", value:null};
+            });
+            Object.keys(evidenceStates).forEach(id => {
+                if (!selected.includes(id) && evidenceStates[id].state === "PRESENT") delete evidenceStates[id];
+            });
+            evidenceStatesInput.value = JSON.stringify(evidenceStates);
+            if (!selected.length) {
+                followupPanel.hidden = true;
+                followupList.innerHTML = "";
+                return;
+            }
+
+            const age = document.querySelector('[name="age"]').value || "30";
+            const sex = document.querySelector('[name="sex"]:checked')?.value || "U";
+            const response = await fetch("/api/followups", {
+                method: "POST",
+                headers: {"Content-Type":"application/json"},
+                body: JSON.stringify({evidence_states:evidenceStates, age, sex, limit:6})
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            evidenceStatesInput.value = JSON.stringify(evidenceStates);
+            if (data.urgent) {
+                followupPanel.hidden = false;
+                followupList.innerHTML = `<div class="urgent-alert"><strong>Urgent warning signs</strong><p>${data.safety.guidance}</p></div>`;
+                return;
+            }
+            if (!data.questions.length) {
+                followupPanel.hidden = true;
+                return;
+            }
+            followupPanel.hidden = false;
+            followupList.innerHTML = "";
+            data.questions.forEach(question => {
+                const id = question.evidence_id;
+                const wrapper = document.createElement("fieldset");
+                wrapper.className = "followup-question";
+                if (question.type === "C") {
+                    const values = question.values.map(value => {
+                        const meaning = question.value_meaning[value]?.en || value;
+                        return `<option value="${value}">${meaning}</option>`;
+                    }).join("");
+                    wrapper.innerHTML = `<legend>${question.question}</legend><select class="followup-value"><option value="">Unknown</option>${values}</select>`;
+                    followupList.appendChild(wrapper);
+                    wrapper.querySelector("select").addEventListener("change", event => {
+                        evidenceStates[id] = event.target.value
+                            ? {state:"PRESENT", value:event.target.value}
+                            : {state:"UNKNOWN", value:null};
+                        evidenceStatesInput.value = JSON.stringify(evidenceStates);
+                    });
+                    return;
+                }
+                if (question.type === "M") {
+                    const values = question.values.map(value => {
+                        const meaning = question.value_meaning[value]?.en || value;
+                        return `<label class="multi-value"><input type="checkbox" value="${value}"><span>${meaning}</span></label>`;
+                    }).join("");
+                    wrapper.innerHTML = `<legend>${question.question}</legend><div class="multi-values">${values}</div>`;
+                    followupList.appendChild(wrapper);
+                    wrapper.querySelectorAll("input").forEach(input => input.addEventListener("change", () => {
+                        const selectedValues = [...wrapper.querySelectorAll("input:checked")].map(item => item.value);
+                        evidenceStates[id] = selectedValues.length
+                            ? {state:"PRESENT", value:selectedValues}
+                            : {state:"UNKNOWN", value:null};
+                        evidenceStatesInput.value = JSON.stringify(evidenceStates);
+                    }));
+                    return;
+                }
+                let options = `<label><input type="radio" name="follow_${id}" value="PRESENT"><span>Present</span></label>
+                    <label><input type="radio" name="follow_${id}" value="ABSENT"><span>Absent</span></label>
+                    <label><input type="radio" name="follow_${id}" value="UNKNOWN" checked><span>Unknown</span></label>`;
+                wrapper.innerHTML = `<legend>${question.question}</legend><div class="three-state">${options}</div>`;
+                followupList.appendChild(wrapper);
+                wrapper.querySelectorAll("input").forEach(input => input.addEventListener("change", () => {
+                    evidenceStates[id] = {state:input.value, value:null};
+                    evidenceStatesInput.value = JSON.stringify(evidenceStates);
+                }));
+            });
+        }
+        search.addEventListener("input", updateCards);
+        checkboxes.forEach(item => item.addEventListener("change", updateSelection));
+        document.querySelectorAll(".category").forEach(button => button.addEventListener("click", () => {
+            document.querySelectorAll(".category").forEach(item => item.classList.remove("active"));
+            button.classList.add("active");
+            activeCategory = button.dataset.category;
+            updateCards();
+        }));
+        clearButton.addEventListener("click", () => {
+            checkboxes.forEach(item => item.checked = false);
+            updateSelection();
+        });
+        document.addEventListener("keydown", event => {
+            if (event.key === "/" && document.activeElement !== search) {
+                event.preventDefault();
+                search.focus();
+            }
+        });
+        document.getElementById("history-link").addEventListener("click", () =>
+            document.getElementById("history").scrollIntoView({behavior:"smooth"})
+        );
+        updateCards();
+        updateSelection();
+    </script>
+</body>
+</html>
